@@ -1,7 +1,7 @@
 module memory_checker #(
   parameter REG_AMOUNT = 10,
   parameter REG_W      = $clog2( REG_AMOUNT ),
-  parameter CSR_W      = 16,
+  parameter CSR_W      = 32,
   parameter ADDR_W     = 16
 )(
   input                      clk_i,
@@ -44,11 +44,13 @@ logic          burst_type;
 
 logic [2 : 0]  burst_cnt;
 
-logic [7:0]  rnd_data = 8'hFF;
-logic [31:0] rnd_addr = 32'hFF_FF_FF_FF;
-
+logic [7:0]    rnd_data      = 8'hFF;
+logic [7:0]    save_rnd_data = 8'hFF;
+logic [31:0]   rnd_addr      = ( ADDR_W )'hFF_FF_FF_FF;
+logic [31:0]   save_rnd_addr = ( ADDR_W )'hFF_FF_FF_FF;
 
 //-----------------------------------------------
+
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     wr_en <= 1'b0;
@@ -60,7 +62,6 @@ always_ff @( posedge clk_i, posedge rst_i )
     wr_data <= '0;
   else if( write_slave )
     wr_data <= writedata_slave;
-
 
 //-----------------------------------------------
 
@@ -136,7 +137,7 @@ always_ff @( posedge clk_i, posedge rst_i )
 
   else
 
-    
+
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
@@ -254,3 +255,37 @@ else if( load_test_cnt )
   test_cnt <= csr[2];
 else if( test_finished )
   test_cnt <= test_cnt - 1'b1;
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    reg_addr <= '0;
+  else if( start_test_bit )
+    case( csr[1][12:10] )
+      3'b000 : reg_addr <= csr[3];
+      3'b001, 3'b100 : reg_addr <= rnd_addr;
+      3'b010 : reg_addr <= start_position_for_0;
+      3'b011 : reg_addr <= '0;
+      default : reg_addr <= '0;
+  else if( inc_addr )
+    reg_addr <= reg_addr + 1;
+  else if( running_one )
+    reg_addr <= reg_addr << 1;
+  else if( running_zero )
+    reg_addr <= reg_addr;
+
+    
+    else if( load_reg_addr )
+    if( rnd_addr_apply )
+      reg_addr <= rnd_addr; 
+    else
+      reg_addr <= csr[3];
+  else if( inc_addr )
+    reg_addr <= reg_addr + 1;
+  else if( running_one )
+    reg_addr <= reg_addr << 1;
+  else if( running_zero )
+    reg_addr <= reg_addr;
+
+    else
+
+

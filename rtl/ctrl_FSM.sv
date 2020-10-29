@@ -101,68 +101,71 @@ always_comb
   end
 
 always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    int_cmd_cnt <= '0;
-  else if( ( csr[1][15:13] == 3'b010 ) || ( csr[1][15:13] == 3'b011 ) )
-    if( state == START_TEST_S )
-      int_cmd_cnt <= ADDR_W;
-    else if( cmd_accepted )
-      if( int_cmd_cnt != 0 )
-        int_cmd_cnt <= int_cmd_cnt - 1;
-      else
-        int_cmd_cnt <= ADDR_W;
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    int_cmd_cnt_empty <= 1'b0;
-  else if( ( csr[1][15:13] != 3'b010 ) && ( csr[1][15:13] != 3'b011 ) )
-    if( state == START_TEST_S )
-      begin
-        int_cmd_cnt_empty <= 1'b1;
-      end
-  else
-    if( state == START_TEST_S )
-      begin
-        int_cmd_cnt_empty <= 1'b0;
-      end
-    else if( ( int_cmd_cnt == 1 ) && cmd_accepted )
-      int_cmd_empty <= 1'b1;
-    else
-      int_cmd_empty <= 1'b0;
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    save_checker_state <= 1'b0;
-  else
-
-
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    cmp_en <= 1'b0;
-  else if( ( state == READ_WORD_S ) && cmd_block_ready )
-    cmp_en <= 1'b1;
-  else if( ( state == READ_ONLY_S ) && ( csr[1][15:14] == 2'b11 ) )
-    cmp_en <= 1'b1;
-  else if( word_checked_sig )
-    cmp_en <= 1'b0;
-
-always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i  )
     cmd_cnt <= 0;
   else if( start_bit_set || ( state == RESTORE_CHECKER_STATE_S ) )
     cmd_cnt <= csr[1][31:20];
-  else if( cmd_accepted && ( cmd_cnt != 0 ) && int_cmd_empty )
+  else if( cmd_accepted && ( cmd_cnt != 0 ) && complex_cmd_empty )
     cmd_cnt <= cmd_cnt - 1;
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     cmd_cnt_empty <= '0;
-  else if(
+  else if( ( cmd_cnt == 1 ) && complex_cmd_empty && cmd_accepted )
+    cmd_cnt_empty <= 1'b1;
+  else if( cmd_accepted )
+    cmd_cnt_empty <= 1'b0;
 
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    complex_cmd_cnt <= '0;
+  else if( ( csr[1][15:13] == 3'b010 ) || ( csr[1][15:13] == 3'b011 ) )
+    if( state == START_TEST_S )
+      complex_cmd_cnt <= ( ADDR_W - 1 );
+    else if( cmd_accepted )
+      if( complex_cmd_cnt != 0 )
+        complex_cmd_cnt <= complex_cmd_cnt - 1;
+      else
+        complex_cmd_cnt <= ( ADDR_W - 1 );
 
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    complex_cmd_cnt_empty <= 1'b0;
+  else if( ( csr[1][15:13] != 3'b010 ) && ( csr[1][15:13] != 3'b011 ) )
+    begin
+      if( state == START_TEST_S )
+          complex_cmd_cnt_empty <= 1'b1;
+    end
+  else
+    if( state == START_TEST_S )
+      begin
+        complex_cmd_cnt_empty <= 1'b0;
+      end
+    else if( ( complex_cmd_cnt == 1 ) && cmd_accepted )
+      complex_cmd_empty <= 1'b1;
+    else if( cmd_accepted )
+      complex_cmd_empty <= 1'b0;
 
-  
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    save_checker_state <= 1'b0;
+  else if( ( state == START_TEST_S ) && ( csr[1][15:13] == 3'b010 || 3'b011 ) )
+    save_checker_state <= 1'b1;
+  else
+    save_checker_state <= 1'b0;
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    cmp_en <= 1'b0;
+  else if( ( state == READ_WORD_S ) && cmd_accepted )
+    cmp_en <= 1'b1;
+  else if( state == RESTORE_CHECKER_STATE_S )
+    cmp_en <= 1'b1;
+  else if( ( state == CHECK_ALL_WORDS_S ) && cmp_list_empty )
+    cmp_en <= 1'b0;
+  else if( word_checked_sig )
+    cmp_en <= 1'b0;
+
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     wr_en <= 1'b0;
@@ -170,17 +173,17 @@ always_ff @( posedge clk_i, posedge rst_i )
     if( cmd_cnt > 1 )
       wr_en <= 1'b1;
     else if( cmd_cnt == 1 )
-      if( wr_en == 1'b1 && cmd_block_ready )
+      if( wr_en == 1'b1 && cmd_accepted )
         wr_en <= 1'b0;
       else
         wr_en <= 1'b1;
     else
       wr_en <= 1'b0;
-  else if( state == WRITE_WORD_S )
+  else if( state == WRITE_ONE_WORD_S )
     wr_en <= 1'b1;
-  else if( state == READ_WORD_S )
+  else if( state == READ_ONE_WORD_S )
     begin
-      if( cmd_block_ready )
+      if( cmd_accepted )
         wr_en <= 1'b0;
     end
   else
@@ -193,22 +196,32 @@ always_ff @( posedge clk_i, posedge rst_i )
     if( cmd_cnt > 1 )
       rd_en <= 1'b1;
     else if( cmd_cnt == 1 )
-      if( rd_en == 1'b1 && cmd_block_ready )
+      if( rd_en == 1'b1 && cmd_accepted )
         rd_en <= 1'b0;
       else
         rd_en <= 1'b1;
     else
       rd_en <= 1'b0;
   else if( state == READ_WORD_S )
-    rd_en <= cmd_block_ready;
+    rd_en <= cmd_accepted;
   else if( state == CHECK_WORD_S )
     begin
-      if( cmd_accept_ready )
+      if( cmd_accept )
         rd_en <= 1'b0;
     end
   else
+    rd_en <= 1'b0;
 
-assign cmp_data_en = ( state == READ_ONLY_S ) && ( !restore_and_check_sig ) && ( csr[1][15:14] == 2'b11 );
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    next_addr <= 1'b0;
+  else if( csr[1][17:16] != 2'b10 )
+    next_addr <= 1'b1;
+  else
+    if( state != READ_ONE_WORD_S )
+      next_addr <= 1'b1;
+    else
+      next_addr <= 1'b0;
 
 // detect start-test bit set and reset start-test bit in csr after it
 always_ff @( posedge clk_2_i, posedge rst_i )

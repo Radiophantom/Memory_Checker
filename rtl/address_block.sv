@@ -1,45 +1,47 @@
 Module address_block #(
-  parameter DATA_DDR_W = 64,
-  parameter DATA_AMM_W = 512
-  parameter ADDR_TYPE = BYTE
+  parameter CTRL_DATA_W = 64,
+  parameter CTRL_ADDR_W = 12,
+  parameter AMM_DATA_W  = 512
 )( 
-  input clk_i, 
-  input rst_i,
+  input   rst_i,
+  input   clk_i,
 
-  input start_transaction_en,
-  input repeat_transaction_en,
+  input   trans_en_i,
+  input   trans_type_i, // 0-write, 1-read
+  input   next_addr_en_i,
 
+  input   save_dev_state_i,
+  input   restore_dev_state_i,
 
-
-  output
-  output
+  output  cmd_accepted_o
 );
 
 localparam SYMBOL_PER_WORD = DATA_AMM_W/DATA_DDR_W;
 
 logic [ADDR_W - 1:0] addr_reg;
-logic [ADDR_W - 1:0] rnd_addr_reg;
+logic [ADDR_W - 1:0] rnd_addr_reg = '1;
 logic 
 
-function logic check_data_pattern(  input logic [DATA_W - 1: 0] data,
-                                    input logic [7:0]           pattern );
+function logic [DATA_W/8 - 1 : 0] byteenable_ptrn(  input logic [clog2( DATA_W/8 ) - 1 : 0] current_address,
+                                                    input logic                             pattern_type     ) // 0-one address, 1-pattern
 
-  for( int i = 0; i < DATA_W/8; i++)
-    begin
-      if( data[DATA_W - 8*i : DATA_W - 7 -8*i] != pattern )
-        return 1'b0;
-    end
+  if( pattern_type )
+    for( int i = 0; i < DATA_W/8; i++ )
+      byteenable_ptrn[i] = ( i < current_address );
+  else
+    for( int i = 0; i < DATA_W/8; i++ )
+      byteenable_ptrn[i] = ( i == current_address );
 
-  return 1'b1;
+  return byteenable_ptrn;
 
 endfunction
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     rnd_addr_reg <= 32'hFF_FF_FF_FF;
-  else if( load_rnd_addr_reg )
+  else if( restore_dev_state_i )
     rnd_addr_reg <= rnd_addr_store;
-  else if( next_rnd_addr_en )
+  else if( ( csr[1][15:13] == 3'b001 ) && trans_en_i && next_addr_en_i )
     rnd_addr_reg <= { rnd_addr_reg[30:0], rnd_addr_gen_bit };
 
 assign rnd_addr_gen_bit = rnd_addr[31] ^ rnd_addr[3] ^ rnd_addr[0];
@@ -47,51 +49,50 @@ assign rnd_addr_gen_bit = rnd_addr[31] ^ rnd_addr[3] ^ rnd_addr[0];
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     rnd_addr_store <= '0;
-  else if( store_current_state_sig )
+  else if( ( csr[1][15:13] == 3'b001 ) && save_dev_state_i )
     rnd_addr_store <= rnd_addr_reg;
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
-    test_started <= 1'b0;
-  else if( transaction_en_sig )
-    test_started <= 1'b1;
-  else if( end_of_test_sig )
-    test_started <= 1'b0;
+    running_0_reg <= '0;
+  else if( csr[1][15:13] == 3'b010 )
+    if( start_test_i || restore_dev_state_i )
+      running_0_reg <= '1 - 1'b1;
+    else if( trans_en_i && next_addr_en_i )
+      running_0_reg <= { running_0_reg[ADDR_W - 2 : 0], running_0_reg[ADDR_W - 1] };
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    running_1_reg <= '0;
+  else if( csr[1][15:13] == 3'b011 )
+    if( start_test_i || restore_dev_state_i )
+      running_1_reg <= '0 + 1'b1;
+    else if( trans_en_i && next_addr_en_i )
+      running_1_reg <= { running_1_reg[ADDR_W - 2 : 0], running_1_reg[ADDR_W - 1] };
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    inc_addr_reg <= '0;
+  else if( csr[1][15:13] == 3'b100 )
+    if( start_test_i || restore_dev_state_i )
+      inc_addr_reg <= csr[2][ADDR_W - 1 : 0];
+    else if( trans_en_i && next_addr_en_i )
+      inc_addr_reg <= inc_addr_reg + 1'b1;
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     address <= '0;
-  else if( transaction_en_sig && next_addr_en && ( !waitrequest ) )
-    if( csr[1][11:0] == 'd1 )
-      if( csr[1][15:13] == 3'b000 )
-        address <= csr[2][ADDR_W - 1 : 0];
-      else if( csr[1][15:13] == 3'b001 )
-        address <= rnd_addr_reg;
-      else if( csr[1][15:13] == 3'b010 )
-        address <= running_0;
-      else if( csr[1][15:13] == 3'b011 )
-        address <= running_1;
-      else if( csr[1][15:13] == 3'b100 )
-        if( test_started == 1'b0 )
-          address <= csr[2][ADDR_W - 1 : 0];
-        else
-          address <= address + 1;
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    running_0 <= '0;
-  else if( reset_state_sig )
-    running_0 <= '1 - 1;
-  else if( ( csr[1][15:13] == 3'b010 ) && next_addr_en )
-    running_0 <= { running_0[ADDR_W - 1 : 0], running_0[ADDR_W] };
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    running_1 <= '0;
-  else if( reset_state_sig )
-    running_1 <= '0 + 1;
-  else if( ( csr[1][15:13] == 3'b011 ) && next_addr_en )
-    running_1 <= { running_1[ADDR_W - 1 : 0], running_1[ADDR_W] };
+  else if( ( !waitrequest ) && trans_en_i && next_addr_en_i && burst_flag )
+    if( csr[1][15:13] == 3'b000 )
+      address <= csr[2][ADDR_W - 1 : clog2( DATA_W/8 )];
+    else if( csr[1][15:13] == 3'b001 )
+      address <= rnd_addr_reg[ADDR_W - 1 : clog2( DATA_W/8 )];
+    else if( csr[1][15:13] == 3'b010 )
+      address <= running_0_reg[ADDR_W - 1 : clog2( DATA_W/8 )];
+    else if( csr[1][15:13] == 3'b011 )
+      address <= running_1_reg[ADDR_W - 1 : clog2( DATA_W/8 )];
+    else if( csr[1][15:13] == 3'b100 )
+      address <= inc_addr_reg[ADDR_W - 1 : clog2( DATA_W/8 )];
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )

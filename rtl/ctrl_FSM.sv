@@ -22,7 +22,18 @@ module ctrl_FSM
   output  test_finished_o
 );
 
-typedef enum logic [2:0] { IDLE_S, START_TEST_S, WRITE_ONLY_S, READ_ONLY_S, WRITE_WORD_S, READ_WORD_S, CHECK_WORD_S, CHECK_ALL_WORDS_S, ERROR_CHECK_WORD_S, END_TRANSACTION_S } state, next_state;
+typedef enum logic [2:0] {
+  IDLE_S,
+  START_TEST_S,
+  WRITE_ONLY_S,
+  READ_ONLY_S,
+  WRITE_WORD_S,
+  READ_WORD_S,
+  CHECK_WORD_S,
+  CHECK_ALL_WORDS_S,
+  ERROR_CHECK_WORD_S,
+  END_TRANSACTION_S
+} state, next_state;
 
 logic [6:0] cmd_cnt;
 

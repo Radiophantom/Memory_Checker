@@ -1,103 +1,104 @@
 Module address_block #(
+  parameter AMM_DATA_W  = 128,
+  parameter AMM_ADDR_W  = 10,
+  parameter ADDR_TYPE   = BYTE, // BYTE or WORD
+
   parameter CTRL_DATA_W = 64,
-  parameter CTRL_ADDR_W = 12,
-  parameter AMM_DATA_W  = 512,
-  parameter ADDR_TYPE   = BYTE // BYTE or WORD
+  parameter CTRL_ADDR_W = 12
 )( 
   input   rst_i,
   input   clk_i,
 
-  input   start_test_i,
   input   trans_en_i,
   input   trans_type_i, // 0-write, 1-read
   input   next_addr_en_i,
-
-  input   save_start_addr_i,
   input   restore_start_addr_i,
 
-  output  cmd_accepted_o
+  output  cmd_accepted_o,
+  output  cmd_done_o,
+
+  input   waitrequest_i,
+  
+  input                                 readdatavalid_i,
+  input   logic [AMM_DATA_W - 1 : 0]    readdata_i,
+
+  output  logic [AMM_ADDR_W - 1 : 0]    address_o,
+  output                                read_o,
+  output                                write_o,
+  output  logic [AMM_DATA_W - 1 : 0]    writedata_o,
+  output  logic [AMM_DATA_W/8 - 1 : 0]  byteenable_o
 );
 
 localparam SYMBOL_PER_WORD = DATA_AMM_W/DATA_DDR_W;
 localparam BYTE_PER_WORD   = DATA_AMM_W/8;
 localparam BYTE_ADDR_W     = clog2( BYTE_PER_WORD );
 
-logic [ADDR_W - 1:0] addr_reg;
-
 generate
-
-  if( ADDR_W <= 8 )
+  if( CTRL_ADDR_W <= 8 )
     begin
-      logic [7:0] rnd_addr_reg = 8'b1;
-      logic [7:0] rnd_addr_reg = 8'b1;
-      assign rnd_addr_gen_bit = rnd_addr[31] ^ rnd_addr[3] ^ rnd_addr[0];
+      logic [7:0] rnd_addr_reg = '1;
+      logic [7:0] rnd_addr_reg_store = '1;
+      assign rnd_addr_gen_bit = rnd_addr[7] ^ rnd_addr[5] ^ rnd_addr[4] ^ rnd_addr[3];
     end
-  else if( ADDR_W <= 16 )
+  else if( CTRL_ADDR_W <= 16 )
     begin
-      logic [15:0] rnd_addr_reg = 16'b1;
-      logic [15:0] rnd_addr_reg = 16'b1;
-      assign rnd_addr_gen_bit = rnd_addr[31] ^ rnd_addr[3] ^ rnd_addr[0];
+      logic [15:0] rnd_addr_reg = '1;
+      logic [15:0] rnd_addr_reg_store = '1;
+      assign rnd_addr_gen_bit = rnd_addr[15] ^ rnd_addr[14] ^ rnd_addr[12] ^ rnd_addr[3];
     end
-  else if( ADDR_W <= 32 )
+  else if( CTRL_ADDR_W <= 32 )
     begin
-      logic [31:0] rnd_addr_reg = 32'b1;
-      logic [31:0] rnd_addr_reg = 32'b1;
-      assign rnd_addr_gen_bit = rnd_addr[31] ^ rnd_addr[3] ^ rnd_addr[0];
+      logic [31:0] rnd_addr_reg = '1;
+      logic [31:0] rnd_addr_reg_store = '1;
+      assign rnd_addr_gen_bit = rnd_addr[31] ^ rnd_addr[21] ^ rnd_addr[1] ^ rnd_addr[0];
     end
-
 endgenerate
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
+    fix_addr_reg <= '0;
+  else if( ( csr[1][15:13] == 3'b000 ) || restore_start_addr_i )
+    fix_addr_reg <= csr[2][ADDR_W - 1 : 0];
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
     rnd_addr_reg <= 32'hFF_FF_FF_FF;
-  else if( restore_start_addr_i )
-    rnd_addr_reg <= rnd_addr_store;
-  else if( ( csr[1][15:13] == 3'b001 ) && trans_en_i && next_addr_en_i )
-    rnd_addr_reg <= { rnd_addr_reg[30:0], rnd_addr_gen_bit };
+  else if( csr[1][15:13] == 3'b001 )
+    if( restore_start_addr_i )
+      rnd_addr_reg <= 32'hFF_FF_FF_FF;
+    else if( trans_en_allowed && next_addr_en_i )
+      rnd_addr_reg <= { rnd_addr_reg[30:0], rnd_addr_gen_bit };
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
-    rnd_addr_store <= '0;
-  else if( ( csr[1][15:13] == 3'b001 ) && save_dev_state_i )
-    rnd_addr_store <= rnd_addr_reg;
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    running_0_reg <= 'd0 + 1'b1;
+    running_0_reg <= '1 - 1'b1;
   else if( csr[1][15:13] == 3'b010 )
-    if( start_test_i || restore_dev_state_i )
+    if( restore_start_addr_i )
       running_0_reg <= '1 - 1'b1;
-    else if( trans_en_i && next_addr_en_i )
+    else if( trans_en_allowed && next_addr_en_i )
       running_0_reg <= { running_0_reg[ADDR_W - 2 : 0], running_0_reg[ADDR_W - 1] };
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
-    running_1_reg <= '0;
+    running_1_reg <= '0 + 1'b1;
   else if( csr[1][15:13] == 3'b011 )
-    if( start_test_i || restore_dev_state_i )
+    if( restore_start_addr_i )
       running_1_reg <= '0 + 1'b1;
-    else if( trans_en_i && next_addr_en_i )
+    else if( trans_en_allowed && next_addr_en_i )
       running_1_reg <= { running_1_reg[ADDR_W - 2 : 0], running_1_reg[ADDR_W - 1] };
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     inc_addr_reg <= '0;
   else if( csr[1][15:13] == 3'b100 )
-    if( start_test_i || restore_dev_state_i )
+    if( restore_start_addr_i )
       inc_addr_reg <= csr[2][ADDR_W - 1 : 0];
-    else if( trans_en_i && next_addr_en_i )
+    else if( trans_en_allowed && next_addr_en_i )
       inc_addr_reg <= inc_addr_reg + 1'b1;
-
-generate
-  if( ADDR_TYPE == BYTE )
-    
-  else if( ADDR_TYPE == WORD )
-
-endgenerate
 
 always_comb
   case( csr[1][15:13] )
-    3'b000  : decoded_addr = csr[2][ADDR_W - 1 : 0];
+    3'b000  : decoded_addr = fix_addr_reg;
     3'b001  : decoded_addr = rnd_addr_reg[ADDR_W - 1 : 0];
     3'b010  : decoded_addr = running_0_reg;
     3'b011  : decoded_addr = running_1_reg;
@@ -105,105 +106,90 @@ always_comb
     default : decoded_addr = (ADDR_W)'bX;
   endcase
 
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    word_aligned_addr <= 1'b0;
-  else if( trans_en_i && next_addr_en_i )
-    word_aligned_addr <= ( decoded_addr[BYTE_ADDR_W - 1 : 0] == (BYTE_ADDR_W)'d0 );
+// flags registers
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
-    short_burst <= 1'b0;
-  else if( trans_en_i && next_addr_en_i )
-    short_burst <= ( BYTE_PER_WORD - ( decoded_addr[BYTE_ADDR_W - 1 : 0] + csr[1][BYTE_ADDR_W - 1 : 0] ) );
+    word_addr_aligned <= 1'b0;
+  else if( trans_en_allowed && next_addr_en_i )
+    word_addr_aligned <= ( decoded_addr[BYTE_ADDR_W - 1 : 0] == (BYTE_ADDR_W)'d0 );
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
-    low_burst_en <= 1'b0;
-  else if( trans_en_i )
-    if( ADDR_TYPE == WORD )
-      low_burst_en <= ( csr[1][10:0] > 11'd1 );
-    else if( ADDR_TYPE == BYTE )
-      low_burst_en <= ( byte_transfered  > csr[1][BYTE_PER_WORD : 0] );
-
-assign byte_transfered = ( ( BYTE_PER_WORD ) - decoded_addr[BYTE_ADDR_W - 1 : 0] );
+    simple_burst <= 1'b0;
+  else if( trans_en_allowed && next_addr_en_i )
+    simple_burst <= ( BYTE_PER_WORD - ( decoded_addr[BYTE_ADDR_W - 1 : 0] + csr[1][BYTE_ADDR_W - 1 : 0] ) );
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
-    byte_transfered_reg <= (BYTE_ADDR_W)'b0;
-  else if( trans_en_i && next_addr_en_i )
-    byte_transfered_reg <= byte_transfered;
+    long_burst <= 1'b0;
+  else if( trans_en_allowed && next_addr_en_i )
+    long_burst <= ( csr[1][10 : BYTE_PER_WORD + 1] != 0 );
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
-    high_burst_en <= 1'b0;
-  else if( trans_en_i )
-    high_burst_en <= ( csr[1][10 : BYTE_PER_WORD + 1] != 0 );
-
-assign burst_en = ( low_burst_en || high_burst_en );
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    address_1 <= (ADDR_W)'b0;
-  else if( trans_en_i && next_addr_en_i )
-    address_1 <= { decoded_addr[ADDR_W - 1 : BYTE_ADDR_W] , (BYTE_ADDR_W)'b0 };
-
-if( ADDR_TYPE == BYTE )generate
-  always_ff @( posedge clk_i, posedge rst_i )
-    if( rst_i )
-      single_word_mode <= 1'b0;
-    else if( trans_en_i )
-      single_word_mode <= ( ( csr[1][15:13] == 3'b010 ) || ( csr[1][15:13] == 3'b011 ) );
-end if
+    address_aligned <= (ADDR_W)'b0;
+  else if( trans_en_allowed && next_addr_en_i )
+    address_aligned <= { decoded_addr[ADDR_W - 1 : BYTE_ADDR_W] , (BYTE_ADDR_W)'b0 };
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     burst_byte_left <= '0;
-  else if( trans_en_i )
+  else if( trans_en_allowed )
     burst_byte_left <= ( csr[1][10:0] - byte_transfered );
+
+assign byte_transfered = ( csr[1][10:0] - ( BYTE_PER_WORD - decoded_addr[BYTE_ADDR_W - 1 : 0] ) );
+
+assign trans_en_allowed = ( trans_en_i && cmd_accepted_o );
+
+//-------------------------------------------------------------------------------- 
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    load_ctrl_en <= 1'b0;
+  else
+    load_ctrl_en <= trans_en_allowed;
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     burstcount <= '0;
-  else if( 2_trans_en )
+  else if( load_ctrl_en )
     burstcount <= csr[1][11:0];
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
+    op_type <= 1'b0;
+  else if( trans_en_allowed )
+    op_type <= trans_type_i;
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
     burst_cnt <= '0;
-  else if( 2_trans_en_i && burst_en )
-    if( int_cmd_accepted && !cmd_accepted_o )
+  else if( long_burst || simple_burst )
+    if( load_ctrl_en )
+      burst_cnt <= ( csr[1][10:0] - byte_transfered );
+    else if( !waitrequest_i )
       if( ADDR_TYPE == BYTE )
-        burst_cnt <= burst_cnt - DATA_W/8;
+        burst_cnt <= burst_cnt - BYTE_PER_WORD; 
       else if( ADDR_TYPE == WORD )
         burst_cnt <= burst_cnt - 1;
-    else if( !cmd_accepted_o )
-      burst_cnt <= csr[1][11:0];
 
+// now will be last transaction, but it not done yet (simultaneously with last valid operation)
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     burst_cnt_empty <= 1'b0;
-  else if( ( burst_cnt < DATA/8 ) && transaction_en_sig )
-    burst_cnt_empty <= 1'b1;
-  else if( transaction_en_sig )
-    burst_cnt_empty <= 1'b0;
-
-
-
-
-
-
-
-
-
+  else if( ADDR_TYPE == BYTE )
+    burst_cnt_empty <= ( write_o || read_o ) && ( burst_cnt <= BYTE_PER_WORD );
+  else if( ADDR_TYPE == WORD )
+    burst_cnt_empty <= ( write_o || read_o ) && ( burst_cnt == 'd1 );
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     cmd_accepted_o <= 1'b0;
-  else if( 2_stage_busy )
-    cmd_accepted_o <= 1'b0;
-  else
-    cmd_accepted_o <= 1'b1;
+  else if( cmd_accepted_o == 1'b0 )
+    cmd_accepted_o <= ( burst_cnt_empty && !waitrequest_i );
+  else if( cmd_accepted_o == 1'b1 )
+    cmd_accepted_o <= ( long_burst || !simple_burst );
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
@@ -247,10 +233,14 @@ always_ff @( posedge clk_i, posedge rst_i )
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     rnd_data_reg <= 8'hFF;
-  else if( load_data_ptrn_sig )
-    rnd_data_reg <= rnd_data_store;
-  else if( rnd_data_en )
-    rnd_data_reg <= { rnd_data_reg[6:0], rnd_data_gen_bit };
+  else if( csr[1][12] == 1'b0 )
+    if( restore_start_addr_i )
+      rnd_data_reg <= csr[3][7:0];
+  else if( csr[1][12] == 1'b1 )
+    if( restore_start_addr_i )
+      rnd_data_reg <= 8'hFF;
+    else if( rnd_data_en )
+      rnd_data_reg <= { rnd_data_reg[6:0], rnd_data_gen_bit };
 
 assign rnd_data_gen_bit = rnd_data[6] ^ rnd_data[1] ^ rnd_data[0];
 

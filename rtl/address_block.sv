@@ -1,3 +1,12 @@
+typedef struct {
+  logic     operation_type;
+  logic     burst_en;
+  logic     word_end_aligned;
+  logic [10 : 0]     burst_word_count;
+  logic [BYTE_ADDR_W - 1 : 0] start_offset;
+  logic [BYTE_ADDR_W - 1 : 0] end_offset;
+} flag_type;
+
 Module address_block #(
   parameter AMM_DATA_W  = 128,
   parameter AMM_ADDR_W  = 12,
@@ -8,6 +17,10 @@ Module address_block #(
 )( 
   input                                 rst_i,
   input                                 clk_i,
+
+  // Stop test
+  input                                 stop_module,
+  output                                module_stopped,
 
   // Control module interface
   input                                 trans_en_i,
@@ -25,17 +38,12 @@ Module address_block #(
   output  logic [10 : 0]                burst_length_o,
   output  logic [7 : 0]                 check_data_o,
 
-  // Avalon-MM output interface
-  input                                 readdatavalid_i,
-  input   logic [AMM_DATA_W - 1 : 0]    readdata_i,
-  input                                 waitrequest_i,
+  // Controller interface
+  input                                 controller_busy_i,
 
-  output  logic [AMM_ADDR_W - 1 : 0]    address_o,
-  output                                read_o,
-  output                                write_o,
-  output  logic [AMM_DATA_W - 1 : 0]    writedata_o,
-  output  logic [10 : 0]                burstcount_o,
-  output  logic [AMM_DATA_W/8 - 1 : 0]  byteenable_o
+  output logic                                    valid_operation_o,
+  output logic [AMM_ADDR_W - BYTE_ADDR_W - 1 : 0] address_o,
+  output flag_type                                operation_o
 );
 
 localparam SYMBOL_PER_WORD = AMM_DATA_W/CTRL_DATA_W;
@@ -175,85 +183,5 @@ always_ff @( posedge clk_i, posedge rst_i )
   else if( trans_en_allowed && cmd_accepted_o )
     op_type <= trans_type_i;
 
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    burstcount_o <= '0;
-  else if( trans_to_ctrl )
-    if( op_type  == 1'b0 )
-      burstcount_o <= csr[1][11:0];
-    else
-      burstcount_o <=  burst_left;
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    burst_cnt <= '0;
-  else if( burst_en )
-    if( trans_to_ctrl )
-      burst_cnt <= ( csr[1][10:0] - burst_transfered );
-    else if( !waitrequest_i )
-      if( ADDR_TYPE == BYTE )
-        burst_cnt <= burst_cnt - BYTE_PER_WORD; 
-      else if( ADDR_TYPE == WORD )
-        burst_cnt <= burst_cnt - 1;
-
-// now will be last transaction, but it not done yet (simultaneously with last valid operation)
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    burst_cnt_empty <= 1'b0;
-  else if( ADDR_TYPE == BYTE )
-    burst_cnt_empty <= ( write_o || read_o ) && ( burst_cnt <= BYTE_PER_WORD );
-  else if( ADDR_TYPE == WORD )
-    burst_cnt_empty <= ( write_o || read_o ) && ( burst_cnt == 'd1 );
-
-function logic [DATA_W/8 - 1 : 0] byteenable_ptrn(  input logic [clog2( DATA_W/8 ) - 1 : 0] current_address,
-                                                    input logic                             pattern_type     ) // 0-one address, 1-pattern
-
-    for( int i = 0; i < DATA_W/8; i++ )
-      if( pattern_type )
-        byteenable_ptrn[i] = ( i < current_address );
-      else
-        byteenable_ptrn[i] = ( i == current_address );
-
-  return byteenable_ptrn;
-
-endfunction
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    byteenable <= '0;
-  else if( ( csr[1][18] == 1'b0 ) && start_bit_set )
-    byteenable <= '1;
-  else if( ( csr[1][18] == 1'b1 ) && transaction_en_sig )
-    if( ( csr[1][13:11] == 3'b010 ) || ( csr[1][13:11] == 3'b011 ) )
-      for( int i = 0; i < DATA_BYTE; i++ )
-        byteenable[i] = ( reg_addr == i );
-    else if( burst_cnt > SYMBOL_PER_WORD )
-      byteenable <= '1;
-    else if( burst_cnt < SYMBOL_PER_WORD )
-      for( int i = 0; i < SYMBOL_PER_WORD; i++ )
-        if( i < reg_addr[2:0] )
-          byteenable <= 1'b1;
-        else
-          byteenable <= 1'b0;
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    rnd_data_reg <= 8'hFF;
-  else if( csr[1][12] == 1'b0 )
-    if( restore_start_addr_i )
-      rnd_data_reg <= csr[3][7:0];
-  else if( csr[1][12] == 1'b1 )
-    if( restore_start_addr_i )
-      rnd_data_reg <= 8'hFF;
-    else if( load_data_en )
-      rnd_data_reg <= { rnd_data_reg[6:0], rnd_data_gen_bit };
-
-assign rnd_data_gen_bit = rnd_data[6] ^ rnd_data[1] ^ rnd_data[0];
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    writedata_o <= '0;
-  else if( load_data_en )
-    writedata_o <= { (BYTE_PER_WORD){ rnd_data_reg } };
 
 endmodule

@@ -5,29 +5,30 @@ Module transmitter_block #(
   parameter ADDR_TYPE     = BYTE,
 
   parameter BYTE_PER_WORD = AMM_DATA_W/8,
-  parameter BYTE_ADDR_W   = $clog2( BYTE_PER_WORD )
+  parameter BYTE_ADDR_W   = $clog2( BYTE_PER_WORD ),
+  parameter ADDR_W        = ( AMM_ADDR_W - BYTE_ADDR_W )
 )( 
-  input                                     rst_i,
-  input                                     clk_i,
+  input                                  rst_i,
+  input                                  clk_i,
 
   // Address block interface
-  input                                     operation_valid_i,
-  input flag_type                           operation_i,
-  input [AMM_ADDR_W - BYTE_ADDR_W - 1 : 0]  address_i,
+  input                                  operation_valid_i,
+  input  op_type                         operation_i,
+  input          [ADDR_W - 1 : 0]        address_i,
   
-  output logic                              busy_o,
+  output logic                           busy_o,
 
   // Avalon-MM output interface
-  input                                 readdatavalid_i,
-  input   logic [AMM_DATA_W - 1 : 0]    readdata_i,
-  input                                 waitrequest_i,
+  input                                  readdatavalid_i,
+  input  logic   [AMM_DATA_W - 1 : 0]    readdata_i,
+  input                                  waitrequest_i,
 
-  output  logic [AMM_ADDR_W - 1 : 0]    address_o,
-  output  logic                         read_o,
-  output  logic                         write_o,
-  output  logic [AMM_DATA_W - 1 : 0]    writedata_o,
-  output  logic [AMM_BURST_W - 1 : 0]   burstcount_o,
-  output  logic [BYTE_PER_WORD - 1 : 0] byteenable_o
+  output logic   [AMM_ADDR_W - 1 : 0]    address_o,
+  output logic                           read_o,
+  output logic                           write_o,
+  output logic   [AMM_DATA_W - 1 : 0]    writedata_o,
+  output logic   [AMM_BURST_W - 1 : 0]   burstcount_o,
+  output logic   [BYTE_PER_WORD - 1 : 0] byteenable_o
 );
 
 function logic [BYTE_PER_WORD - 1 : 0] byteenable_ptrn( input logic                       start_offset_en,

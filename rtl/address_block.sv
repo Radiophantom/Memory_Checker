@@ -8,12 +8,13 @@ typedef struct {
 } flag_type;
 
 Module address_block #(
-  parameter AMM_DATA_W  = 128,
-  parameter AMM_ADDR_W  = 12,
-  parameter ADDR_TYPE   = BYTE, // "BYTE" or "WORD"
-
-  parameter CTRL_DATA_W = 64,
-  parameter CTRL_ADDR_W = 12
+  parameter AMM_DATA_W    = 128,
+  parameter AMM_ADDR_W    = 12,
+  parameter AMM_BURST_W   = 11,
+  parameter ADDR_TYPE     = BYTE,
+  parameter BYTE_PER_WORD = AMM_DATA_W/8,
+  parameter BYTE_ADDR_W   = $clog2( BYTE_PER_WORD ),
+  parameter ADDR_W        = ( AMM_ADDR_W - BYTE_ADDR_W )
 )( 
   input                                 rst_i,
   input                                 clk_i,
@@ -30,25 +31,11 @@ Module address_block #(
 
   output                                cmd_accepted_o,
 
-  // Compare module interface
-  input                                 block_rd_trans_i,
-  
-  output  logic                         cmp_addr_en_o,
-  output  logic [AMM_ADDR_W - 1 : 0]    check_addr_o,
-  output  logic [10 : 0]                burst_length_o,
-  output  logic [7 : 0]                 check_data_o,
-
-  // Controller interface
-  input                                 controller_busy_i,
-
-  output logic                                    valid_operation_o,
-  output logic [AMM_ADDR_W - BYTE_ADDR_W - 1 : 0] address_o,
-  output flag_type                                operation_o
+  output logic                                    operation_valid_o,
+  output flag_type                                operation_o,
+  output logic [AMM_ADDR_W - BYTE_ADDR_W - 1 : 0] address_o
 );
 
-localparam SYMBOL_PER_WORD = AMM_DATA_W/CTRL_DATA_W;
-localparam BYTE_PER_WORD   = AMM_DATA_W/8;
-localparam BYTE_ADDR_W     = $clog2( BYTE_PER_WORD );
 
 logic rnd_addr_gen_bit;
 logic [AMM_ADDR_W - 1 : 0] running_0_reg;

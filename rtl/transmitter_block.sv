@@ -13,8 +13,7 @@ Module transmitter_block #(
 
   // Address block interface
   input                                  operation_valid_i,
-  input  op_type                         operation_i,
-  input          [ADDR_W - 1 : 0]        address_i,
+  input  transaction_type                operation_i,
   
   output logic                           busy_o,
 
@@ -49,11 +48,11 @@ always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     busy_o <= 1'b0;
   else if( !busy_o )
-    if( operation_i.operation_type )
+    if( operation_i.op_type )
       busy_o <= ( start_transaction && waitrequest_i );
     else
       busy_o <= ( start_transaction && ( burst_en || waitrequest_i );
-  else if( current_burst_en && !current_operation.operation_type )
+  else if( current_burst_en && !current_operation.op_type )
     busy_o <= ( last_transaction && !waitrequest_i );
   else
     busy_o <= ( !waitrequest_i );
@@ -82,10 +81,10 @@ generate
       always_ff @( posedge clk_i, posedge rst_i )
         if( rst_i )
           byteenable_o <= '0;
-        else if( start_transaction && operation_i.operation_type )
+        else if( start_transaction && operation_i.op_type )
           byteenable_o <= '1;
         else if( start_transaction || ( busy_o && !waitrequest_i ) )
-          if( operation_i.operation_type )
+          if( operation_i.op_type )
             byteenable_o <= '1;
           else if( burst_en )
             byteenable_o <= byteenable_ptrn( start_transaction, operation_i.start_offset, last_transaction, current_operation.end_offset );
@@ -98,7 +97,7 @@ generate
         if( rst_i )
           burstcount_o <= '0;
         else if( start_transaction )
-          if( operation_i.operation_type )
+          if( operation_i.op_type )
             burstcount_o <= operation_i.burst_word_count;
           else
             burstcount_o <= csr[1][AMM_BURST_W - 1 : 0];
@@ -124,7 +123,7 @@ always_ff @( posedge clk_i, posedge rst_i )
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     write_o <= 1'b0;
-  else if( start_transaction && ( operation_i.operation_type == 1'b0 ) )
+  else if( start_transaction && ( operation_i.op_type == 1'b0 ) )
     write_o <= 1'b1;
   else if( current_burst_en )
     write_o <= !( busy_o && last_transaction && !waitrequest_i );
@@ -134,7 +133,7 @@ always_ff @( posedge clk_i, posedge rst_i )
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     read_o <= 1'b0;
-  else if( start_transaction && ( operation_i.operation_type == 1'b1 ) )
+  else if( start_transaction && ( operation_i.op_type == 1'b1 ) )
     read_o <= 1'b1;
   else if( !waitrequest_i )
     read_o <= 1'b0;
@@ -155,8 +154,8 @@ always_ff @( posedge clk_i, posedge rst_i )
     else
       writedata_o <= { (BYTE_PER_WORD){ rnd_data_reg } };
 
-assign burst_en         = ( !operation_i.operation_type && operation_i.low_burst && operation_i.high_burst );
-assign current_burst_en = ( !current_operation.operation_type && current_operation.low_burst && current_operation.high_burst );
+assign burst_en         = ( !operation_i.op_type && operation_i.low_burst && operation_i.high_burst );
+assign current_burst_en = ( !current_operation.op_type && current_operation.low_burst && current_operation.high_burst );
 
 assign start_transaction = ( operation_valid_i && !busy_o );
 assign rnd_data_gen_bit  = ( rnd_data[6] ^ rnd_data[1] ^ rnd_data[0] );

@@ -1,7 +1,7 @@
 typedef struct {
   logic [ADDR_W - 1 : 0]      word_address;
-  logic                       high_burst;
-  logic                       low_burst;
+  logic                       high_burst_en;
+  logic                       low_burst_en;
   logic [AMM_BURST_W - 1 : 0] word_burst_count;
   logic [BYTE_ADDR_W - 1 : 0] start_offset;
   logic [BYTE_ADDR_W - 1 : 0] end_offset;
@@ -11,28 +11,25 @@ module control_block #(
   parameter AMM_DATA_W    = 128,
   parameter AMM_ADDR_W    = 12,
   parameter AMM_BURST_W   = 11,
-  parameter ADDR_TYPE     = BYTE,
+  parameter ADDR_TYPE     = BYTE, // WORD or BYTE
   parameter BYTE_PER_WORD = AMM_DATA_W/8,
   parameter BYTE_ADDR_W   = $clog2( BYTE_PER_WORD ),
   parameter ADDR_W        = ( AMM_ADDR_W - BYTE_ADDR_W )
 )
 (
-  input               rst_i,
-  input               clk_i,
+  input                    rst_i
+  input                    clk_i,
 
-  input               start_test_i,
+  input                    start_test_i,
+  input                    stop_test_i,
 
-  input               stop_test_i,
-
-  input   [31:0][2:0] CSR_reg_i,
+  input        [31:0][2:0] CSR_reg_i,
   
-  input               cmd_accept_ready_i,
+  input                    cmd_accept_ready_i,
 
-  output              transaction_en_o,
-  output              transaction_type_o, // 0-write, 1-read
-
-  output logic                          operation_valid_o,
-  output transaction_type               operation_o
+  output logic             operation_valid_o,
+  output logic             operation_type_o, // 0-write, 1-read
+  output transaction_type  operation_o
 );
 
 typedef enum logic [2:0] { // may be don't declare the width of type
@@ -44,12 +41,23 @@ typedef enum logic [2:0] { // may be don't declare the width of type
   ERROR_CHECK_WORD_S
 } state, next_state;
 
-logic [6:0] cmd_cnt;
-logic rnd_addr_gen_bit;
-logic [AMM_ADDR_W - 1 : 0] running_0_reg;
-logic [AMM_ADDR_W - 1 : 0] running_1_reg;
-logic [AMM_ADDR_W - 1 : 0] inc_addr_reg;
-logic [AMM_ADDR_W - 1 : 0] fix_addr_reg;
+logic [11:0]  cmd_cnt;
+logic         last_transaction;
+
+logic                       rnd_addr_gen_bit;
+logic [AMM_ADDR_W - 1 : 0]  running_0_reg;
+logic [AMM_ADDR_W - 1 : 0]  running_1_reg;
+logic [AMM_ADDR_W - 1 : 0]  inc_addr_reg;
+logic [AMM_ADDR_W - 1 : 0]  fix_addr_reg;
+
+logic [AMM_BURST_W - 1 : 0] word_burst_count;
+logic                       next_addr_en;
+logic                       next_addr_allowed;
+logic                       operation_en;
+logic                       low_burst_en;
+logic                       high_burst_en;
+logic [BYTE_ADDR_W - 1 : 0] start_offset;
+logic [BYTE_ADDR_W - 1 : 0] end_offset;
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
@@ -70,7 +78,6 @@ always_comb
               2'b01   : next_state = READ_ONLY_S;
               2'b10   : next_state = WRITE_ONLY_S;
               2'b11   : next_state = WRITE_WORD_S;
-              // check if "default" word enable
             endcase
         end
       READ_ONLY_S :
@@ -110,47 +117,46 @@ always_ff @( posedge clk_i, posedge rst_i )
     cmd_cnt <= 0;
   else if( start_test_i )
     cmd_cnt <= CSR_reg_i[0][31:20];
-  else if( cmd_accept_ready_i )
+  else if( operation_valid_o && cmd_accept_ready_i )
     cmd_cnt <= cmd_cnt - 1;
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     last_transaction <= 1'b0;
   else if( start_test_i )
-    last_transaction <= ( CSR_reg_i[0][31:20] == 12'd1 ); // check if no repeat cmd enable
-  else if( ( cmd_cnt == 2 ) && cmd_accept_ready_i )
-    last_transaction <= 1'b1;
-  else if( cmd_accept_ready_i )
-    last_transaction <= 1'b0;
-
-assign transaction_en_state = ( state == WRITE_ONLY_S     ) ||
-                              ( state == READ_ONLY_S      ) ||
-                              ( state == WRITE_ONE_WORD_S ) ||
-                              ( state == READ_ONE_WORD_S  );
+    last_transaction <= ( CSR_reg_i[0][31:20] == 12'd1 );
+  else if( operation_valid_o && cmd_accept_ready_i )
+    last_transaction <= ( cmd_cnt == 12'd2 );
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
-    trans_en_o <= 1'b0;
+    operation_valid_o <= 1'b0;
   else if( stop_test_i )
-    trans_en_o <= 1'b0;
+    operation_valid_o <= 1'b0;
   else if( transaction_en_state && !last_transaction )
-    trans_en_o <= 1'b1;
-  else if( transaction_en_state && cmd_accept_ready_i )
-    trans_en_o <= 1'b0;
+    operation_valid_o <= 1'b1;
+  else if( cmd_accept_ready_i )
+    operation_valid_o <= 1'b0;
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
-    trans_type_o <= 1'b0;
-  else if( state == WRITE_ONLY_S )
-    trans_type_o <= 1'b0;
-  else if( state == READ_ONLY_S )
-    trans_type_o <= 1'b1;
-  else if( ( state == WRITE_ONE_WORD_S ) && cmd_accept_ready_i )
-    trans_type_o <= 1'b1;
-  else if( ( state == READ_ONE_WORD_S ) && cmd_accept_ready_i )
-    trans_type_o <= 1'b0;
+    operation_type_o <= 1'b0;
+  else
+    case( state )
+      WRITE_ONLY_S : operation_type_o <= 1'b0;
+      READ_ONLY_S  : operation_type_o <= 1'b1;
+      WRITE_WORD_S : operation_type_o <= ( !operation_type_o && cmd_accept_ready_i );
+      READ_WORD_S  : operation_type_o <= !( operation_type_o && cmd_accept_ready_i );
+      default      : operation_type_o <= 1'bX;
+    endcase
 
-// address generate and decode -------------------------------------------------------------------------
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    next_addr_en <= 1'b0;
+  else
+    next_addr_en <= ( operation_en && next_addr_allowed );
+
+// address generate and decode block -------------------------------------------------------------------------
 
 generate
   if( AMM_ADDR_W <= 8 )
@@ -170,78 +176,97 @@ generate
     end
 endgenerate
 
-assign next_addr_en = ( ( state == WRITE_ONLY_S ) && cmd_accept_ready_i ) ||
-                      ( ( state == WRITE_WORD_S ) && cmd_accept_ready_i );
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    fix_addr_reg <= '0;
+  else if( ( CSR_reg_i[0][15:13] == 3'b000 ) && start_test_i )
+    fix_addr_reg <= CSR_reg_i[1][AMM_ADDR_W - 1 : 0];
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
-    rnd_addr_reg <= '1;
-  else if( ( CSR_reg_i[0][15:13] == 3'b001 ) && next_addr_en )
-    rnd_addr_reg <= { rnd_addr_reg[ $left( rnd_addr_reg ) - 2 : 0], rnd_addr_gen_bit };
+    rnd_addr_reg <= '0;
+  else if( CSR_reg_i[0][15:13] == 3'b001 )
+    if( start_test_i )
+      rnd_addr_reg <= { (AMM_ADDR_W){1'b1} };
+    else if( next_addr_en )
+      rnd_addr_reg <= { rnd_addr_reg[ $left( rnd_addr_reg ) - 2 : 0], rnd_addr_gen_bit };
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
-    running_0_reg <= ( '1 - 1'b1 );
-  else if( ( CSR_reg_i[0][15:13] == 3'b010 ) && next_addr_en )
-    running_0_reg <= { running_0_reg[ADDR_W - 2 : 0], running_0_reg[ADDR_W - 1] };
+    running_0_reg <= '0;
+  else if( CSR_reg_i[0][15:13] == 3'b010 ) && next_addr_en )
+    if( start_test_i )
+      running_0_reg <= { (AMM_ADDR_W-1){1'b1}, 1'b0 };
+    else if( next_addr_en )
+      running_0_reg <= { running_0_reg[AMM_ADDR_W - 2 : 0], running_0_reg[AMM_ADDR_W - 1] };
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
-    running_1_reg <= ( '0 + 1'b1 );
-  else if( ( CSR_reg_i[0][15:13] == 3'b011 ) && next_addr_en )
-    running_1_reg <= { running_1_reg[ADDR_W - 2 : 0], running_1_reg[ADDR_W - 1] };
+    running_1_reg <= '0;
+  else if( CSR_reg_i[0][15:13] == 3'b011 )
+    if( start_test_i )
+      running_1_reg <= { (AMM_ADDR_W-1){1'b0}, 1'b1 };
+    else if( next_addr_en )
+      running_1_reg <= { running_1_reg[AMM_ADDR_W - 2 : 0], running_1_reg[AMM_ADDR_W - 1] };
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     inc_addr_reg <= '0;
   else if( CSR_reg_i[0][15:13] == 3'b100 )
     if( start_test_i )
-      inc_addr_reg <= CSR_reg_i[1][ADDR_W - 1 : 0];
+      inc_addr_reg <= CSR_reg_i[1][AMM_ADDR_W - 1 : 0];
     else if( next_addr_en )
       inc_addr_reg <= inc_addr_reg + 1'b1;
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    fix_addr_reg <= '0;
-  else if( start_test_i && ( CSR_reg_i[0][15:13] == 3'b000 ) )
-    fix_addr_reg <= CSR_reg_i[1][ADDR_W - 1 : 0];
 
 always_comb
   case( CSR_reg_i[0][15:13] )
     3'b000  : decoded_addr = fix_addr_reg;
-    3'b001  : decoded_addr = rnd_addr_reg[ADDR_W - 1 : 0];
+    3'b001  : decoded_addr = rnd_addr_reg[AMM_ADDR_W - 1 : 0];
     3'b010  : decoded_addr = running_0_reg;
     3'b011  : decoded_addr = running_1_reg;
     3'b100  : decoded_addr = inc_addr_reg;
-    default : decoded_addr = (ADDR_W)'bX;
+    default : decoded_addr = (AMM_ADDR_W)'bX;
   endcase
 
-assign low_burst  = ( ( BYTE_PER_WORD - decoded_addr[BYTE_ADDR_W - 1 : 0]  ) - CSR_reg_i[1][BYTE_ADDR_W - 1 : 0] ) <= 0 );
-assign high_burst = ( CSR_reg_i[1][10 : BYTE_ADDR_W + 1] != 0 );
-
-assign start_offset = decoded[BYTE_ADDR_W - 1 : 0];
-assign end_offset   = ( decoded[BYTE_ADDR_W - 1 : 0] + CSR_reg_i[1][BYTE_ADDR_W - 1 : 0] - 1'b1 );
-
-assign word_burst_count = CSR_reg_i[1][10 : BYTE_ADDR_W + 1];
+always_comb
+  if( ADDR_TYPE == WORD )
+    word_burst_count = CSR_reg_i[1][AMM_BURST_W - 1 : 0];
+  else if( ADDR_TYPE == BYTE )
+    word_burst_count = { (BYTE_ADDR_W)'b0, CSR_reg_i[1][AMM_BURST_W - 1 : BYTE_ADDR_W] };
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     begin
-      operation_o.word_address <= (ADDR_W)'b0;
-      operation_o.high_burst   <= 1'b0;
-      operation_o.low_burst    <= 1'b0;
-      operation_o.word_burst_count <= (AMM_BURST_W)'d0;
-      operation_o.start_offset  <= (BYTE_ADDR_W)'d0;
-      operation_o.end_offset    <= (BYTE_ADDR_W + 1)'d0;
+      operation_o.word_address      <= (ADDR_W)'b0;
+      operation_o.high_burst_en     <= 1'b0;
+      operation_o.low_burst_en      <= 1'b0;
+      operation_o.word_burst_count  <= (AMM_BURST_W)'d0;
+      operation_o.start_offset      <= (BYTE_ADDR_W)'d0;
+      operation_o.end_offset        <= (BYTE_ADDR_W)'d0;
     end
-  else if( next_addr_en )
+  else if( operation_en && operation_allowed )
     begin
       operation_o.word_address      <= { decoded_addr[ADDR_W - 1 : BYTE_ADDR_W] , (BYTE_ADDR_W)'b0 };
-      operation_o.high_burst        <= high_burst;
-      operation_o.low_burst         <= low_burst;
+      operation_o.high_burst_en     <= high_burst_en;
+      operation_o.low_burst_en      <= low_burst_en;
       operation_o.word_burst_count  <= word_burst_count;
       operation_o.start_offset      <= start_offset;
       operation_o.end_offset        <= end_offset;
     end
+
+assign next_addr_allowed  = ( state == WRITE_ONLY_S ) || ( state == WRITE_WORD_S );
+
+assign operation_allowed  = ( state == WRITE_ONLY_S ) ||
+                            ( state == READ_ONLY_S  ) ||
+                            ( state == WRITE_WORD_S ) ||
+                            ( state == READ_WORD_S  );
+
+assign operation_en       = ( !operation_valid_o ) || ( operation_valid_o && cmd_accept_ready_i );
+
+assign low_burst_en       = ( ( ( BYTE_PER_WORD - decoded_addr[BYTE_ADDR_W - 1 : 0]  ) - CSR_reg_i[1][BYTE_ADDR_W - 1 : 0] ) < 0 );
+assign high_burst_en      = ( CSR_reg_i[1][AMM_BURST_W - 1 : BYTE_ADDR_W] != 0 );
+
+assign start_offset       = decoded[BYTE_ADDR_W - 1 : 0];
+assign end_offset         = ( decoded[BYTE_ADDR_W - 1 : 0] + CSR_reg_i[1][BYTE_ADDR_W - 1 : 0] );
 
 endmodule

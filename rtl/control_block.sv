@@ -11,6 +11,7 @@ module control_block #(
   parameter AMM_DATA_W    = 128,
   parameter AMM_ADDR_W    = 12,
   parameter AMM_BURST_W   = 11,
+  parameter CTRL_ADDR_W   = 10, // pay attention it doesn't used now
   parameter ADDR_TYPE     = BYTE, // WORD or BYTE
   parameter BYTE_PER_WORD = AMM_DATA_W/8,
   parameter BYTE_ADDR_W   = $clog2( BYTE_PER_WORD ),

@@ -1,4 +1,4 @@
-Module transmitter_block #(
+module transmitter_block #(
   parameter AMM_DATA_W    = 128,
   parameter AMM_ADDR_W    = 12,
   parameter AMM_BURST_W   = 11,
@@ -12,19 +12,10 @@ Module transmitter_block #(
   input                                  clk_i,
 
   // Address block interface
-  input                    cmd_accept_ready_i,
-
-  output logic             operation_valid_o,
-  output logic             operation_type_o, // 0-write, 1-read
-  output transaction_type  operation_o
-
-  // Cmp block interface
-  output logic             valid_cmp_en_o,
-  output logic             start_offset_o,
-  output logic             end_offset_o,
-  output logic             address_o,
-  output logic             burst_count_o,
-  output logic             data_ptrn_o,
+  input                                  operation_valid_i,
+  input  transaction_type                operation_i,
+  
+  output logic                           busy_o,
 
   // Avalon-MM output interface
   input                                  readdatavalid_i,

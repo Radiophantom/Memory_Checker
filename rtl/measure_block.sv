@@ -1,12 +1,10 @@
 module transmitter_block #(
   parameter AMM_DATA_W    = 128,
-  parameter AMM_ADDR_W    = 12,
   parameter AMM_BURST_W   = 11,
   parameter ADDR_TYPE     = BYTE,
 
   parameter BYTE_PER_WORD = AMM_DATA_W/8,
-  parameter BYTE_ADDR_W   = $clog2( BYTE_PER_WORD ),
-  parameter ADDR_W        = ( AMM_ADDR_W - BYTE_ADDR_W )
+  parameter BYTE_ADDR_W   = $clog2( BYTE_PER_WORD )
 )( 
   input                                  rst_i,
   input                                  clk_i,
@@ -14,14 +12,14 @@ module transmitter_block #(
   // Output interface
   input                                  reset_module_i,
 
-  output logic  [31:0] write_ticks_o,
-  output logic  [31:0] write_unit_count_o,
-  output logic  [31:0] read_ticks_o,
+  output logic  [31:0] read_request_amount_o,
   output logic  [31:0] read_word_count_o,
   output logic  [15:0] min_delay_o,
   output logic  [15:0] max_delay_o,
   output logic  [31:0] sum_delay_o,
   output logic  [31:0] read_transaction_count_o,
+  output logic  [31:0] write_ticks_o,
+  output logic  [31:0] write_unit_count_o,
   
   // Avalon-MM output interface
   input                         readdatavalid_i,
@@ -33,6 +31,9 @@ module transmitter_block #(
   input [BYTE_PER_WORD - 1 : 0] byteenable_i
 );
 
+localparam CNT_NUM  = 4;
+localparam CNT_W    = $clog2( CNT_NUM );
+
 automatic function logic [BYTE_ADDR_W : 0] byte_amount_func( input logic [BYTE_PER_WORD-1 : 0] byteenable_vec );
   //byte_amount_func = (BYTE_ADDR_W)'d0;
   foreach( byteenable_vec[i] )
@@ -41,15 +42,152 @@ automatic function logic [BYTE_ADDR_W : 0] byte_amount_func( input logic [BYTE_P
   return byte_amount_func;
 endfunction
 
+logic write_unit_count_en;
+logic [11:0] write_unit_cnt_high, write_unit_cnt_low ;
+logic high_unit_cnt_en;
+
+assign read_strobe = ( read_i && !waitrequest_i ); 
+
+logic unsigned [CNT_W-1 : 0] active_cnt_num, load_cnt_num;
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    active_cnt_num <= (CNT_W)'d0;
+  else if( last_word_flag ) 
+    active_cnt_num <= active_cnt_num + 1'b1;
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    load_cnt_num <= (CNT_W)'d0;
+  else if( read_strobe )
+    load_cnt_num <= load_cnt_num + 1'b1;
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    word_cnt_vec = (CNT_NUM){ (AMM_BURST_W)'d0 };
+  else
+    for( int i = 0; i < (CNT_NUM-1); i++ )
+      unique if( read_strobe && ( i == load_cnt_num ) )
+        word_cnt_vec[i] <= burstcount_i;
+      else if( readdatavalid_i && ( i == active_cnt_num ) )
+        word_cnt_vec[i] <= word_cnt_vec[i] - 1'b1; 
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    last_word_vec <= (CNT_NUM){ 1'b0 };
+  else
+    for( int i = 0; i < (CNT_NUM-1); i++ )
+      unique if( read_strobe && ( i == load_cnt_num ) )
+        last_word_vec[i] <= ( burstcount_i == 1 );
+      else if( readdatavalid_i && ( i == active_cnt_num ) )
+        last_word_vec[i] <= ( burstcount_i == 2 );
+
+assign last_word_flag = last_word_vec[active_cnt_num] && readdatavalid_i;
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    act_cnt_vec <= (CNT_NUM){ 1'b0 };
+  else
+    for( int i = 0; i < (CNT_NUM-1); i++ )
+      unique if( read_strobe && ( i == load_cnt_num ) )
+        act_cnt_vec[i] <= 1'b1;
+      else( readdatavalid_i && ( i == active_cnt_num ) )
+        act_cnt_vec[i] <= 1'b0;
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    delay_cnt_vec <= (CNT_NUM){ 16'd0 };
+  else
+    for( int i = 0; i < CNT_NUM-1; i++ )
+      if( act_cnt_vec[i] )
+        delay_cnt_vec[i] <= delay_cnt_vec[i] + 1'b1;
+      else
+        delay_cnt_vec[i] <= 16'd0;
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    prev_cnt_num <= (CNT_W)'d0;
+  else if( last_word_flag )
+    prev_cnt_num <= active_cnt_num;
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    wr_delay_strobe <= 1'b0;
+  else
+    wr_delay_strobe <= last_word_flag;
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    read_request_amount_o <= (32)'d0;
+  else if( reset_module_i )
+    read_request_amount_o <= (32)'d0;
+  else if( wr_delay_strobe )
+    read_request_amount_o <= read_request_amount_o + 1'b1;
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    read_word_count_o <= 32'd0;
+  else if( reset_module_i )
+    read_word_count_o <= 32'd0;
+  else if( readdatavalid_i )
+    read_word_count_o <= read_word_count_o + 1'b1;
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    min_delay_o <= 16'b1; // 16'hFF_FF;
+  else if( reset_module_i )
+    min_delay_o <= 16'b1;
+  else if( wr_delay_strobe && ( delay_cnt_vec[prev_cnt_num] < min_delay_o ) )
+    min_delay_o <= delay_cnt_vec[prev_cnt_num];
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    max_delay_o <= 16'b0; // 16'd0;
+  else if( reset_module_i )
+    max_delay_o <= 16'b0;
+  else if( wr_delay_strobe && ( delay_cnt_vec[prev_cnt_num] > max_delay_o ) )
+    max_delay_o <= delay_cnt_vec[prev_cnt_num];
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    sum_delay_o <= 32'd0;
+  else if( reset_module_i )
+    sum_delay_o <= 32'd0;
+  else if( wr_delay_strobe )
+    sum_delay_o <= sum_delay_o + delay_cnt_vec[prev_cnt_num];
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    read_ticks_cnt_o <= 32'd0;
+  else if( reset_module_i )
+    read_ticks_cnt_o <= 32'd0;
+  else if( read_mode_active )
+    read_ticks_cnt_o <= read_ticks_cnt_o + 1'b1;
+
+assign read_mode_active = ( |act_cnt_vec );
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     write_unit_count_en <= 1'b0;
   else
     write_unit_count_en <= ( write_i && !waitrequest_i );
 
-logic write_unit_count_en;
-logic [11:0] write_unit_cnt_high, write_unit_cnt_low ;
-logic high_unit_cnt_en;
 
 /*
 generate
@@ -140,67 +278,5 @@ always_ff @( posedge clk_i, posedge rst_i )
     write_ticks_o <= 32'd0;
   else if( write_tick_en )
     write_ticks_o <= write_ticks_o + 1'b1;
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    read_sig_temp <= 1'b0;
-  else if( read_i && !waitrequest_i )
-    read_sig_temp <= 1'b0;
-  else
-    read_sig_temp <= read_i;
-
-assign read_strobe = ( !read_sig_temp && read_i ); 
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    first_read_cnt <= (AMM_BURST_W)'d0;
-  else if( read_strobe && !first_read_cnt_busy )
-    first_read_cnt <= burstcount_i;
-  else if( ( first_read_cnt != 0 ) && readdatavalid_i )
-    first_read_cnt <= first_read_cnt - 1'b1;
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    first_read_cnt_busy <= 1'b0;
-  else if( read_strobe && !first_read_cnt_busy )
-    first_read_cnt_busy <= 1'b1;
-  else if( last_first_cnt_word )
-    first_read_cnt_busy <= 1'b0;
-
-assign last_first_cnt_word = ( readdatavalid_i && ( first_read_cnt == 1 ) );
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    second_read_cnt <= 0;
-  else if( read_strobe && first_read_cnt_busy )
-    second_read_cnt <= burstcount_i;
-  else if( ( second_read_cnt != 0 ) && readdatavalid_i && !first_read_cnt_busy )
-    second_read_cnt <= second_read_cnt - 1'b1;
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    second_read_cnt_busy <= 1'b0;
-  else if( read_strobe && first_read_cnt_busy )
-    second_read_cnt_busy <= 1'b1;
-  else if( last_second_cnt_word )
-    second_read_cnt_busy <= 1'b0;
-
-assign last_second_cnt_word = ( readdatavalid_i && ( second_read_cnt == 1 ) );
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    read_ticks_o <= 32'd0;
-  else if( reset_module_i )
-    read_ticks_o <= 32'd0;
-  else if( first_read_cnt_busy || second_read_cnt_busy )
-    read_ticks_o <= read_ticks_o + 1'b1;
-
-always_ff @( posedge clk_i, posedge rst_i )
-  if( rst_i )
-    read_word_count_o <= 32'd0;
-  else if( reset_module_i )
-    read_word_count_o <= 32'd0;
-  else if( readdatavalid_i )
-    read_word_count_o <= read_word_count_o + 1'b1;
 
 endmodule

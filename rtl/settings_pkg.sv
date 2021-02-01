@@ -1,0 +1,50 @@
+package settings_pkg;
+
+parameter int AMM_DATA_W    = 128,
+parameter int AMM_ADDR_W    = 12,
+parameter int CTRL_ADDR_W   = 10,
+parameter int AMM_BURST_W   = 11,
+parameter int ADDR_TYPE     = BYTE,
+
+parameter int BYTE_PER_WORD = AMM_DATA_W/8,
+parameter int BYTE_ADDR_W   = $clog2( BYTE_PER_WORD ),
+parameter int ADDR_W        = ( CTRL_ADDR_W - BYTE_ADDR_W )
+
+typedef enum logic {
+  FIX_DATA,
+  RND_DATA
+} data_mode_type;
+
+typedef enum logic [1:0] {
+  READ_ONLY       = 1,
+  WRITE_ONLY      = 2,
+  WRITE_AND_CHECK = 3
+} test_mode_type;
+
+typedef enum logic [2:0] {
+  FIX_ADDR  = 0,
+  RND_ADDR  = 1,
+  RUN_0     = 2,
+  RUN_1     = 3,
+  INC_ADDR  = 4
+} addr_mode_type;
+
+
+typedef struct packed{
+  logic [ADDR_W - 1        : 0] word_address;
+  logic [AMM_BURST_W - 1   : 0] burst_word_count;
+  logic [BYTE_PER_WORD - 1 : 0] start_mask;
+  logic [BYTE_PER_WORD - 1 : 0] end_mask;
+  logic [7 : 0]                 data_ptrn;
+  logic                         data_ptrn_type;
+} pkt_struct_type;
+
+typedef struct packed{
+  logic [ADDR_W - 1      : 0] word_address;
+  logic [AMM_BURST_W - 1 : 0] high_burst_bits;
+  logic [BYTE_ADDR_W     : 0] low_burst_bits;
+  logic [BYTE_ADDR_W - 1 : 0] start_offset;
+  logic [BYTE_ADDR_W - 1 : 0] end_offset;
+} trans_struct_type;
+
+endpackage

@@ -68,6 +68,8 @@ logic                       low_burst_en_flg;
 logic                       high_burst_en_flg;
 logic                       trans_pkt_en;
 
+logic [BYTE_PER_WORD - 1 : 0] end_mask_temp;
+
 // first stage -- analyzing of packet, calculating main expression
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
@@ -105,6 +107,12 @@ always_ff @( posedge clk_i, posedge rst_i )
     cur_op_type <= 1'b0;
   else if( cmd_accept_ready_o && op_valid_i )
     cur_op_type <= op_type_i;
+
+always_ff @( posedge clk_i, posedge rst_i )
+  if( rst_i )
+    end_mask_temp <= BYTE_PER_WORD'( 0 );
+  else if( trans_pkt_en )
+    end_mask_temp <= cur_op_pkt_struct.end_mask;
 
 // second stage -- transmitting packet through AMM interface
 always_ff @( posedge clk_i, posedge rst_i )
@@ -225,8 +233,8 @@ generate
       assign burstcount_exp = ( low_burst_en_flg ) ?  ( cur_op_pkt_struct.burst_word_count + 2'd2 ) :
                                                       ( cur_op_pkt_struct.burst_word_count + 2'd1 );
 
-      assign byteenable_temp = ( burst_cnt == 2 ) ? ( cur_op_pkt_struct.end_mask ) :
-                                                    ( BYTE_PER_WORD{ 1'b1 }      );
+      assign byteenable_temp = ( burst_cnt == 2 ) ? ( end_mask_temp         ) :
+                                                    ( BYTE_PER_WORD{ 1'b1 } );
 //----------------------------------------------------------------------------------------------------
     end
   else if( ADDR_TYPE == WORD )

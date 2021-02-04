@@ -1,11 +1,6 @@
-module measure_block #(
-  parameter int AMM_DATA_W    = 128,
-  parameter int AMM_BURST_W   = 11,
-  parameter int ADDR_TYPE     = BYTE,
+import settings_pkg::*;
 
-  parameter int BYTE_PER_WORD = AMM_DATA_W/8,
-  parameter int BYTE_ADDR_W   = $clog2( BYTE_PER_WORD )
-)( 
+module measure_block( 
   input                                 rst_i,
   input                                 clk_i,
 
@@ -19,9 +14,9 @@ module measure_block #(
   input         [BYTE_PER_WORD - 1 : 0] byteenable_i,
 
   // CSR interface
-  input                                 reset_module_i,
+  input                                 start_test_i,
 
-  output logic                          busy_status_flag_o,
+  output logic                          trans_block_busy_o,
 
   output logic  [31:0]                  sum_delay_o,
   output logic  [15:0]                  min_delay_o,
@@ -123,7 +118,7 @@ always_ff @( posedge clk_i, posedge rst_i )
       if( act_delay_cnt_vec[i] )
         delay_cnt_vec[i] <= delay_cnt_vec[i] + 1'b1;
       else
-        delay_cnt_vec[i] <= 32'd0;
+        delay_cnt_vec[i] <= 32'( 0 );
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
@@ -139,24 +134,24 @@ always_ff @( posedge clk_i, posedge rst_i )
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
-    read_transactions_count_o <= 32'd0;
-  else if( reset_module_i )
-    read_transactions_count_o <= 32'd0;
+    read_transactions_count_o <= 32'( 0 );
+  else if( start_test_i )
+    read_transactions_count_o <= 32'( 0 );
   else if( wr_delay_strobe )
     read_transactions_count_o <= read_transactions_count_o + 1'b1;
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
-    read_words_count_o <= 32'd0;
-  else if( reset_module_i )
-    read_words_count_o <= 32'd0;
+    read_words_count_o <= 32'( 0 );
+  else if( start_test_i )
+    read_words_count_o <= 32'( 0 );
   else if( readdatavalid_i )
     read_words_count_o <= read_words_count_o + 1'b1;
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     min_delay_o <= 16'hFF_FF;
-  else if( reset_module_i )
+  else if( start_test_i )
     min_delay_o <= 16'hFF_FF;
   else if( wr_delay_strobe && ( delay_cnt_vec[prev_cnt_num] < min_delay_o ) )
     min_delay_o <= delay_cnt_vec[prev_cnt_num];
@@ -164,24 +159,24 @@ always_ff @( posedge clk_i, posedge rst_i )
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
     max_delay_o <= 16'h0;
-  else if( reset_module_i )
+  else if( start_test_i )
     max_delay_o <= 16'h0;
   else if( wr_delay_strobe && ( delay_cnt_vec[prev_cnt_num] > max_delay_o ) )
     max_delay_o <= delay_cnt_vec[prev_cnt_num];
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
-    sum_delay_o <= 32'd0;
-  else if( reset_module_i )
-    sum_delay_o <= 32'd0;
+    sum_delay_o <= 32'( 0 );
+  else if( start_test_i )
+    sum_delay_o <= 32'( 0 );
   else if( wr_delay_strobe )
     sum_delay_o <= sum_delay_o + delay_cnt_vec[prev_cnt_num];
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
-    read_ticks_cnt_o <= 32'd0;
-  else if( reset_module_i )
-    read_ticks_cnt_o <= 32'd0;
+    read_ticks_cnt_o <= 32'( 0 );
+  else if( start_test_i )
+    read_ticks_cnt_o <= 32'( 0 );
   else if( read_mode_active )
     read_ticks_cnt_o <= read_ticks_cnt_o + 1'b1;
 
@@ -189,9 +184,9 @@ assign read_mode_active = ( |act_delay_cnt_vec );
 
 always_ff @( posedge clk_i, posedge rst_i )
   if( rst_i )
-    write_ticks_o <= 32'd0;
-  else if( reset_module_i )
-    write_ticks_o <= 32'd0;
+    write_ticks_o <= 32'( 0 );
+  else if( start_test_i )
+    write_ticks_o <= 32'( 0 );
   else if( write_i )
     write_ticks_o <= write_ticks_o + 1'b1;
 
@@ -205,7 +200,7 @@ generate
     always_ff @( posedge clk_i, posedge rst_i )
       if( rst_i )
         byte_amount <= ( BYTE_ADDR_W + 1 )'( 0 );
-      else if( reset_module_i )
+      else if( start_test_i )
         byte_amount <= ( BYTE_ADDR_W + 1 )'( 0 );
       else if( write_strobe )
         byte_amount <= byte_amount_func( byteenable_i );
@@ -218,17 +213,17 @@ generate
 
     always_ff @( posedge clk_i, posedge rst_i )
       if( rst_i )
-        write_units_count_o <= 32'd0;
-      else if( reset_module_i )
-        write_units_count_o <= 32'd0;
+        write_units_count_o <= 32'( 0 );
+      else if( start_test_i )
+        write_units_count_o <= 32'( 0 );
       else if( delayed_wr_strobe )
         write_units_count_o <= write_units_count_o + byte_amount;
   else if( ADDR_TYPE == WORD )
     always_ff @( posedge clk_i, posedge rst_i )
       if( rst_i )
-        write_units_count_o <= 32'd0;
-      else if( reset_module_i )
-        write_units_count_o <= 32'd0;
+        write_units_count_o <= 32'( 0 );
+      else if( start_test_i )
+        write_units_count_o <= 32'( 0 );
       else if( write_strobe )
         write_units_count_o <= write_units_count_o + 1'b1;
 endgenerate 

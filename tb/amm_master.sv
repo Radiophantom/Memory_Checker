@@ -1,4 +1,4 @@
-class amm_class (
+class amm_master(
   parameter int ADDR_W    = 4,
   parameter int DATA_W    = 31,
   parameter int BURST_W   = 11

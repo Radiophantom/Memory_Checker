@@ -28,6 +28,14 @@ modport master(
   input  waitrequest
 );
 
+modport master_lite(
+  output address,
+  output read,
+  output write,
+  output writedata,
+  input  readdata
+);
+
 modport slave(
   input  address,
   input  read,

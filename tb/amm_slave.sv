@@ -1,14 +1,41 @@
-class amm_slave(
-  parameter int     ADDR_W      = 4,
-  parameter int     DATA_W      = 31,
-  parameter int     BURST_W     = 11,
-  parameter string  ADDR_TYPE   = "BYTE", // BYTE or WORD
-  parameter int     RND_WAITREQ = 0,
-  parameter int     RND_RVALID  = 0
- );
+'include "./transaction.sv"
+'include "./bathtube_distribution.sv"
 
-localparam int DATA_B_W = DATA_W / 8;
-localparam int ADDR_B_W = $clog2( DATA_B_W );
+import settings_pkg::*;
+
+class amm_slave();
+
+bit [7 : 0] memory_array [*];
+bit [7 : 0] rd_data [$];
+
+local task automatic wr_mem(
+  input bit [ADDR_W - 1 : 0]  wr_addr,
+  ref   bit [7 : 0]           wr_data [$]
+);
+
+  while( wr_data.size() )
+    begin
+      memory_array[wr_addr] = wr_data.pop_front();
+      wr_addr++;
+    end
+
+endtask
+
+local task automatic rd_mem(
+  input bit [ADDR_W - 1 : 0]  rd_addr,
+  input int                   bytes_amount
+);
+
+  while( bytes_amount )
+    begin
+      if( memory_array.exists( rd_addr ) )
+        rd_data.push_back( memory_array[rd_start_addr] );
+      else
+        rd_data.push_back( 8'd0 );
+      bytes_amount--;
+    end
+
+endtask
 
 virtual amm_if #(
   .ADDR_W   ( ADDR_W  ),
@@ -16,42 +43,31 @@ virtual amm_if #(
   .BURST_W  ( BURST_W )
 ) amm_if_v;
 
-typedef struct{
-  bit [ADDR_W - 1 : 0]  wr_start_addr;
-  bit [7 : 0]           wr_data [$];
-} wr_trans_t;
-
-typedef struct{
-  bit [ADDR_W - 1 : 0]  rd_start_addr;
-  int                   words_amount ;
-} rd_trans_t;
-
-typedef bit [7 : 0] rd_data_t [$];
-
-mailbox wr_req_mbx;
-mailbox rd_req_mbx;
-
-mailbox rd_data_mbx;
-
 function new(
   virtual amm_if #(
     .ADDR_W   ( ADDR_W  ),
     .DATA_W   ( DATA_W  ),
     .BURST_W  ( BURST_W )
   ) amm_if_v,
-  mailbox wr_req_mbx,
-  mailbox rd_req_mbx,
-  mailbox rd_data_mbx
+  mailbox err_transaction_mbx,
+  mailbox err_transaction_struct_mbx
 );
 
-  this.amm_if_v     = amm_if_v;
-  this.wr_req_mbx   = wr_req_mbx;
-  this.rd_req_mbx   = rd_req_mbx;
-  this.rd_data_mbx  = rd_data_mbx;
+  this.amm_if_v                   = amm_if_v;
+  this.err_transaction_mbx        = err_transaction_mbx;
+  this.err_transaction_struct_mbx = err_transaction_struct_mbx;
 
   init_interface();
 
 endfunction
+
+transaction       wr_req_obj;
+transaction_cbs   wr_req_obj_err;
+
+int write_transaction_num = 0;
+int err_transaction_num   = 0;
+
+semaphore err_insert_sema = new();
 
 local function automatic void init_interface();
 
@@ -71,20 +87,32 @@ local function automatic void init_interface();
 
 endfunction
 
+task automatic set_err_transaction_num();
+  fork
+    forever
+      begin
+        err_transaction_mbx.get( err_transaction_num );
+        write_transaction_num = 0;
+        err_insert_sema.put();
+      end
+  join_none
+endtask
+
 local task automatic wr_data();
 
-  wr_trans_t  wr_req_struct;
-  int         units_amount;
+  int units_amount;
+
+  wr_req_obj = new();
 
   if( ADDR_TYPE == "BYTE" )
     begin
-      wr_req_struct.wr_start_addr = amm_if_v.address;
-      units_amount                = amm_if_v.burstcount;
+      wr_req_obj.put_addr( amm_if_v.address );
+      units_amount = amm_if_v.burstcount;
     end
   else
     begin
-      wr_req_struct.wr_start_addr = ( amm_if_v.address << ADDR_B_W );
-      units_amount                = amm_if_v.burstcount * DATA_B_W;
+      wr_req_obj.put_addr( amm_if_v.address << ADDR_B_W );
+      units_amount = amm_if_v.burstcount * DATA_B_W;
     end
 
   while( 1 )
@@ -93,7 +121,7 @@ local task automatic wr_data();
       for( int i = 0; i < DATA_B_W; i++ )
         if( amm_if_v.byteenable[i] )
           begin
-            wr_req_struct.wr_data.push_back( amm_if_v.writedata[7 + 8*i -: 8] );
+            wr_req_obj.put_data( amm_if_v.writedata[7 + 8*i -: 8] );
             units_amount--;
           end
       if( RND_WAITREQ )
@@ -113,14 +141,23 @@ local task automatic wr_data();
         break;
     end
 
-  wr_req_mbx.put( wr_req_struct );
+  if( write_transaction_num == err_transaction_num )
+    if( err_insert_sema.try_get() )
+      begin
+        wr_req_obj_err = new();
+        wr_req_obj_err = wr_req_obj;
+        wr_req_obj.corrupt_data();
+        err_transaction_struct_mbx.put( wr_req_obj.corrupt_addr, wr_req_obj.orig_data, wr_req_obj.corrupt_data );
+      end
+
+  wr_req_mbx.put( wr_req_obj );
 
 endtask
 
-local task automatic rd_data();
+rd_trans_t  rd_req_struct;
+rd_data_t   rd_data;
 
-  rd_trans_t  rd_req_struct;
-  rd_data_t   rd_data;
+local task automatic rd_data();
 
   if( ADDR_TYPE == "BYTE" )
     rd_req_struct.rd_start_addr = amm_if_v.address;
@@ -130,15 +167,20 @@ local task automatic rd_data();
 
   amm_if_v.waitrequest <= 1'b1;
 
-  rd_req_mbx.put( rd_req_struct );
-  rd_data_mbx.get( rd_data );
+  rd_mem( rd_req_struct.rd_start_addr, rd_req_struct.words_amount );
   send_data( rd_data );
 
   amm_if_v.waitrequest <= 1'b0;
 
 endtask
 
-local task automatic send_data( ref rd_data_t rd_data );
+
+local task automatic send_data(
+  ref bit [7 : 0] rd_data [$]
+);
+
+  repeat( $urandom_range( MIN_DELAY_PARAM, MAX_DELAY_PARAM ) );
+    @( posedge amm_if_v.clk );
 
   while( rd_data.size() )
     begin
@@ -160,6 +202,23 @@ local task automatic send_data( ref rd_data_t rd_data );
   amm_if_v.readdatavalid <= 1'b0;
 
 endtask
+
+bit [ADDR_W - 1 : 0]    corrupt_addr;
+bathtube_distribution   corrupt_index;
+
+function automatic void corrupt_data(
+  ref [7 : 0] wr_data [$]
+);
+
+  corrupt_index = new();
+
+  corrupt_index.set_dist_parameters( wr_data.size() );
+  corrupt_index.randomize();
+  wr_data[corrupt_index.value] = !wr_data[corrupt_index.value];
+
+  corrupt_addr = wr_addr + corrupt_index - 1;
+
+endfunction
 
 task automatic run();
 

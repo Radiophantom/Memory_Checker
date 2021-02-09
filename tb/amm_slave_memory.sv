@@ -1,18 +1,8 @@
-class amm_slave_memory(
-  parameter int ADDR_W  = 31
- );
+import settings_pkg::*;
 
-typedef struct{
-  bit [ADDR_W - 1 : 0]  wr_start_addr;
-  bit [7 : 0]           wr_data [$];
-} wr_trans_t;
+class amm_slave_memory();
 
-typedef struct{
-  bit [ADDR_W - 1 : 0]  rd_start_addr;
-  int                   words_amount ;
-} rd_trans_t;
-
-typedef bit [7 : 0] rd_data_t [$];
+transaction wr_req_obj;
 
 mailbox wr_req_mbx;
 mailbox rd_req_mbx;
@@ -20,6 +10,8 @@ mailbox rd_req_mbx;
 mailbox rd_data_mbx;
 
 bit [7 : 0] memory_array [*];
+
+bit [7 : 0] rd_data_t [$];
 
 function new(
   mailbox wr_req_mbx,
@@ -33,31 +25,21 @@ function new(
 
 endfunction
 
-//local function automatic void init_interface();
-
-//  amm_if_v.read           = 1'b0;
-//  amm_if_v.write          = 1'b0;
-//  amm_if_v.address        = '0;
-//  amm_if_v.writedata      = '0;
-//  amm_if_v.byteenable     = '0;
-//  amm_if_v.burstcount     = '0;
-//  amm_if_v.readdatavalid  = 1'b0;
-//  amm_if_v.readdata       = '0;
-//  amm_if_v.waitrequest    = 1'b0;
-//  
-//  fork
-//    run();
-//  join_none
-
-//endfunction
-
 local task automatic wr_data();
 
-  
-  wr_trans_t  wr_req_struct;
-  int         units_amount;
+  int wr_addr;
+  wr_req_obj = new();
 
-  wr_req_mbx.put( wr_req_struct );
+  wr_req_mbx.get( wr_req_obj );
+  wr_addr = wr_req_obj.wr_addr;
+
+  while( wr_req_obj.wr_data.size() )
+    begin
+      memory_array[wr_addr] = wr_req_obj.wr_data.pop_front();
+      wr_addr++;
+    end
+  //wr_req_obj = null; Не должно повлиять вообще ни на что по идее, надо прове
+  //рить
 
 endtask
 
@@ -66,7 +48,22 @@ local task automatic rd_data();
   rd_trans_t  rd_req_struct;
   rd_data_t   rd_data;
 
-  send_data( rd_data );
+  int words_amount;
+  int rd_start_addr;
+  
+  rd_req_mbx.get( rd_req_struct );
+
+  words_amount  = rd_req_struct.words_amount;
+  rd_start_addr = rd_req_struct.rd_start_addr;
+
+  while( words_amount )
+    begin
+      if( memory_array.exists( rd_start_addr ) )
+        rd_data.push_back( memory_array[rd_start_addr] );
+      else
+        rd_data.push_back( 8'd0 );
+      words_amount--;
+    end
 
 endtask
 
@@ -74,11 +71,10 @@ task automatic run();
 
   forever
     begin
-      @( posedge amm_if_v.clk );
-      if( amm_if_v.write )
+      if( wr_req_mbx.num )
         wr_data();
       else
-        if( amm_if_v.read )
+        if( rd_req_mbx.num )
           rd_data();
     end
 

@@ -4,11 +4,15 @@ parameter int AMM_DATA_W    = 128,
 parameter int AMM_ADDR_W    = 12,
 parameter int CTRL_ADDR_W   = 10,
 parameter int AMM_BURST_W   = 11,
-parameter int ADDR_TYPE     = BYTE,
 
-parameter int BYTE_PER_WORD = AMM_DATA_W/8,
-parameter int BYTE_ADDR_W   = $clog2( BYTE_PER_WORD ),
-parameter int ADDR_W        = ( CTRL_ADDR_W - BYTE_ADDR_W )
+parameter string ADDR_TYPE  = "BYTE",
+
+parameter int RND_WAITREQ   = 0,
+parameter int RND_RVALID    = 0
+
+parameter int DATA_B_W = AMM_DATA_W/8,
+parameter int ADDR_B_W = $clog2( DATA_B_W );
+parameter int ADDR_W   = ( CTRL_ADDR_W - ADDR_B_W );
 
 typedef enum logic {
   FIX_DATA,
@@ -29,6 +33,10 @@ typedef enum logic [2:0] {
   INC_ADDR  = 4
 } addr_mode_type;
 
+typedef struct{
+  bit [ADDR_W - 1 : 0]  rd_start_addr;
+  int                   words_amount ;
+} rd_transaction_t;
 
 typedef struct packed{
   logic [ADDR_W - 1        : 0] word_address;
@@ -37,7 +45,7 @@ typedef struct packed{
   logic [BYTE_PER_WORD - 1 : 0] end_mask;
   logic [7 : 0]                 data_ptrn;
   logic                         data_ptrn_type;
-} pkt_struct_type;
+} pkt_struct_t;
 
 typedef struct packed{
   logic [ADDR_W - 1      : 0] word_address;
@@ -45,6 +53,6 @@ typedef struct packed{
   logic [BYTE_ADDR_W     : 0] low_burst_bits;
   logic [BYTE_ADDR_W - 1 : 0] start_offset;
   logic [BYTE_ADDR_W - 1 : 0] end_offset;
-} trans_struct_type;
+} trans_struct_t;
 
 endpackage

@@ -1,7 +1,6 @@
-class random_scenario #(
-  parameter int ADDR_W  = 31,
-  parameter int BURST_W = 11
-);
+import settings_pkg::*;
+
+class random_scenario();
 
 int read_only_mode;
 int write_only_mode;
@@ -54,20 +53,18 @@ constraint error_enable_constraint {
   };
 }
 
-bit [ADDR_W - 1 : 0]   addr_ptrn; //rand add
-bit [7 : 0]            data_ptrn; //rand add
+bit [ADDR_W - 1 : 0]   addr_ptrn; //rand add if no post_randomize() function
+bit [7 : 0]            data_ptrn; //rand add if no post_randomize() function
 
 function automatic void set_test_mode_probability(
   int read_only_mode  = 10,
   int write_only_mode = 10,
   int write_read_mode = 10
 );
-
   this.read_only_mode   = read_only_mode;
   this.write_only_mode  = write_only_mode;
   this.write_read_mode  = write_read_mode;
-
-endfunction : set_test_mode_probability
+endfunction
 
 function automatic void set_addr_mode_probability(
   int fix_addr_mode   = 10,
@@ -76,43 +73,34 @@ function automatic void set_addr_mode_probability(
   int run_1_addr_mode = 10,
   int inc_addr_mode   = 10
 );
-
   this.fix_addr_mode    = fix_addr_mode;
   this.rnd_addr_mode    = rnd_addr_mode;
   this.run_0_addr_mode  = run_0_addr_mode;
   this.run_1_addr_mode  = run_1_addr_mode;
   this.inc_addr_mode    = inc_addr_mode;
-
-endfunction : set_addr_mode_probability
+endfunction
 
 function automatic void set_err_probability(
   int err_probability     = 5,
   int no_err_probability  = 100
 );
-
   this.err_probability    = err_probability;
   this.no_err_probability = no_err_probability;
-
-endfunction : set_err_probability
+endfunction
 
 function automatic void create_scenario();
-  
   test_parameters[2][31 : 0]  = { transaction_amount, 2'b00, test_mode, addr_mode, data_mode, 1'b0, burst_count };
   test_parameters[1][31 : 0]  = addr_ptrn;
   test_parameters[0][31 : 0]  = data_ptrn;
-
-endfunction : create_scenario
+endfunction
 
 // Можно вообще удалить и оставить как есть, но хочу попробовать использовать
 // эту функцию
 function automatic void post_randomize();
-
   if( addr_mode == 0 || addr_mode == 4 )
     randomize( addr_ptrn );
-
   if( ~data_mode )
     randomize( data_ptrn );
+endfunction
 
-endfunction : post_randomize
-
-endclass : random_scenario
+endclass

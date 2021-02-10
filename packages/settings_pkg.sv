@@ -3,6 +3,7 @@ package settings_pkg;
 parameter int AMM_DATA_W    = 128,
 parameter int AMM_ADDR_W    = 12,
 parameter int CTRL_ADDR_W   = 10,
+parameter int CTRL_DATA_W   = 16,
 parameter int AMM_BURST_W   = 11,
 
 parameter string ADDR_TYPE  = "BYTE",
@@ -13,6 +14,9 @@ parameter int RND_RVALID    = 0
 parameter int DATA_B_W = AMM_DATA_W/8,
 parameter int ADDR_B_W = $clog2( DATA_B_W );
 parameter int ADDR_W   = ( CTRL_ADDR_W - ADDR_B_W );
+
+parameter int CLK_SYS_T = 10000;
+parameter int CLK_MEM_T = 6666;
 
 typedef enum logic {
   FIX_DATA,
@@ -33,10 +37,10 @@ typedef enum logic [2:0] {
   INC_ADDR  = 4
 } addr_mode_type;
 
-typedef struct{
-  bit [ADDR_W - 1 : 0]  rd_start_addr;
-  int                   words_amount ;
-} rd_transaction_t;
+//typedef struct{
+//  bit [ADDR_W - 1 : 0]  rd_start_addr;
+//  int                   words_amount ;
+//} rd_transaction_t;
 
 typedef struct packed{
   logic [ADDR_W - 1        : 0] word_address;
@@ -54,5 +58,10 @@ typedef struct packed{
   logic [BYTE_ADDR_W - 1 : 0] start_offset;
   logic [BYTE_ADDR_W - 1 : 0] end_offset;
 } trans_struct_t;
+
+typedef struct{
+  int unsigned          addr; 
+  bit           [7 : 0] data;
+} err_trans_t;
 
 endpackage

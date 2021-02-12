@@ -15,16 +15,14 @@ int inc_addr_mode;
 int err_probability;
 int no_err_probability;
 
-bit [2 : 0][31 : 0] test_parameters;
-
-rand bit [11 : 0]           transaction_amount;
+rand bit [15 : 0]           transaction_amount;
 rand bit [1 : 0]            test_mode;
 rand bit [2 : 0]            addr_mode;
 rand bit                    data_mode;
 rand bit [BURST_W - 2 : 0]  burst_count;
 
 rand bit                    error_enable;
-bit      [11 : 0]           error_transaction_num;
+bit      [15 : 0]           error_transaction_num;
 
 constraint test_mode_constraint {
   test_mode dist {
@@ -86,12 +84,6 @@ function automatic void set_err_probability(
 );
   this.err_probability    = err_probability;
   this.no_err_probability = no_err_probability;
-endfunction
-
-function automatic void create_scenario();
-  test_parameters[2][31 : 0]  = { transaction_amount, 2'b00, test_mode, addr_mode, data_mode, 1'b0, burst_count };
-  test_parameters[1][31 : 0]  = addr_ptrn;
-  test_parameters[0][31 : 0]  = data_ptrn;
 endfunction
 
 // Можно вообще удалить и оставить как есть, но хочу попробовать использовать

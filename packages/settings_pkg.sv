@@ -1,19 +1,26 @@
 package settings_pkg;
 
-parameter int AMM_DATA_W    = 128,
-parameter int AMM_ADDR_W    = 12,
-parameter int CTRL_ADDR_W   = 10,
-parameter int CTRL_DATA_W   = 16,
-parameter int AMM_BURST_W   = 11,
+parameter int MEM_ADDR_W  = 31
+parameter int MEM_DATA_W  = 16,
+parameter int AMM_ADDR_W  = 28,
+parameter int AMM_DATA_W  = 128,
+parameter int WORD_KOEF   = $clog2( AMM_DATA_W / MEM_DATA_W );
 
-parameter string ADDR_TYPE  = "BYTE",
+parameter string  ADDR_TYPE  = "BYTE", // BYTE or WORD
 
-parameter int RND_WAITREQ   = 0,
-parameter int RND_RVALID    = 0
+if( ADDR_TYPE == "BYTE" )
+  parameter int ADDR_W  = MEM_ADDR_W;
+else if( ADDR_TYPE == "WORD" )
+  parameter int ADDR_W  = MEM_ADDR_W - WORD_KOEF;
+
+parameter int AMM_BURST_W = 11,
 
 parameter int DATA_B_W = AMM_DATA_W/8,
 parameter int ADDR_B_W = $clog2( DATA_B_W );
-parameter int ADDR_W   = ( CTRL_ADDR_W - ADDR_B_W );
+
+
+parameter int RND_WAITREQ   = 0,
+parameter int RND_RVALID    = 0
 
 parameter int CLK_SYS_T = 10000;
 parameter int CLK_MEM_T = 6666;
@@ -37,11 +44,6 @@ typedef enum logic [2:0] {
   INC_ADDR  = 4
 } addr_mode_type;
 
-//typedef struct{
-//  bit [ADDR_W - 1 : 0]  rd_start_addr;
-//  int                   words_amount ;
-//} rd_transaction_t;
-
 typedef struct packed{
   logic [ADDR_W - 1        : 0] word_address;
   logic [AMM_BURST_W - 1   : 0] burst_word_count;
@@ -60,8 +62,27 @@ typedef struct packed{
 } trans_struct_t;
 
 typedef struct{
-  int unsigned          addr; 
-  bit           [7 : 0] data;
-} err_trans_t;
+  bit           error;
+  bit [11 : 0]  error_num;
+} err_struct_t;
+
+typedef struct{
+  bit [31 : 0] csr_1_reg;
+  bit [31 : 0] csr_2_reg;
+  bit [31 : 0] csr_3_reg;
+} test_struct_t;
+
+typedef struct packed{
+  bit [31 : 0] result_reg;
+  bit [31 : 0] err_addr_reg;
+  bit [31 : 0] err_data_reg;
+  bit [31 : 0] wr_ticks_reg;
+  bit [31 : 0] wr_units_reg;
+  bit [31 : 0] rd_ticks_reg;
+  bit [31 : 0] rd_words_reg;
+  bit [31 : 0] min_max_reg;
+  bit [31 : 0] sum_reg;
+  bit [31 : 0] rd_req_reg;
+} res_struct_t;
 
 endpackage
